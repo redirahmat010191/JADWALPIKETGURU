@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Papan Piket Guru</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
+  :root{
+    --board:#1E3A34;
+    --board-dark:#16302B;
+    --board-darker:#0F2521;
+    --chalk:#F4F1E8;
+    --chalk-dim:rgba(244,241,232,0.62);
+    --chalk-faint:rgba(244,241,232,0.32);
+    --brass:#C9A227;
+    --brass-light:#E3C567;
+    --red-flag:#C1443C;
+    --green-ok:#5B9A5F;
+    --line:rgba(244,241,232,0.14);
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:radial-gradient(ellipse at top, #234942 0%, var(--board) 45%, var(--board-darker) 100%);
+    color:var(--chalk);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+    padding:28px 14px 60px;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+
+  header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+  .eyebrow{font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:0.26em;text-transform:uppercase;color:var(--brass-light);display:block;margin-bottom:4px;}
+  h1{font-family:'Oswald',sans-serif;font-weight:600;font-size:30px;margin:0;color:var(--chalk);}
+  .status{font-size:12px;color:var(--chalk-dim);font-style:italic;margin-top:4px;}
+  .admin-btn{font-family:'Oswald',sans-serif;font-size:12.5px;letter-spacing:0.05em;text-transform:uppercase;background:transparent;border:1px solid var(--brass);color:var(--brass-light);padding:9px 16px;border-radius:8px;cursor:pointer;white-space:nowrap;}
+  .admin-btn.active{background:linear-gradient(180deg, var(--brass-light), var(--brass));color:var(--board-darker);font-weight:600;}
+
+  /* Day slide */
+  .day-slide{display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:12px;}
+  .arrow-btn{width:36px;height:36px;border-radius:50%;background:var(--board-dark);border:1px solid var(--line);color:var(--brass-light);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .arrow-btn:hover{border-color:var(--brass);}
+  .arrow-btn:disabled{opacity:0.3;cursor:default;}
+  .day-slide-label{text-align:center;min-width:180px;}
+  .day-name{font-family:'Oswald',sans-serif;font-size:22px;letter-spacing:0.02em;color:var(--chalk);display:block;}
+  .day-date{font-size:12.5px;color:var(--chalk-dim);}
+  .day-pills{display:flex;justify-content:center;gap:7px;margin-bottom:20px;}
+  .day-pill{width:9px;height:9px;border-radius:50%;background:var(--line);border:1px solid transparent;cursor:pointer;padding:0;}
+  .day-pill.active{background:var(--brass-light);width:22px;border-radius:5px;}
+  .day-pill.today{border-color:var(--red-flag);}
+
+  /* Grid */
+  .table-scroll{overflow-x:auto;background:var(--board-dark);border:1px solid var(--line);border-radius:14px;padding:6px;box-shadow:0 20px 40px -20px rgba(0,0,0,0.5);margin-bottom:16px;}
+  table{border-collapse:collapse;width:100%;min-width:920px;}
+  th,td{padding:6px 5px;text-align:center;border-bottom:1px solid var(--line);}
+  thead th{font-family:'Oswald',sans-serif;font-size:11.5px;color:var(--chalk-dim);padding-bottom:10px;}
+  thead th:first-child{text-align:left;}
+  tbody tr:last-child td, tbody tr:last-child th{border-bottom:none;}
+
+  .loc-head{text-align:left;min-width:96px;padding:8px 8px;}
+  .loc-title{font-family:'Oswald',sans-serif;font-size:13px;color:var(--brass-light);}
+
+  .jam-cell{width:88px;}
+  .slot-stack{display:flex;flex-direction:column;gap:4px;}
+  .name-cell{
+    width:100%;min-height:32px;border-radius:7px;border:1px solid var(--line);
+    background:rgba(244,241,232,0.05);color:var(--chalk-dim);font-size:11px;
+    padding:5px 4px;cursor:pointer;font-family:'Inter',sans-serif;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .name-cell.empty{border-style:dashed;color:var(--chalk-faint);opacity:0.5;cursor:default;font-style:italic;}
+  .name-cell.pending{color:var(--chalk);}
+  .name-cell.partial{background:rgba(201,162,39,0.2);border-color:var(--brass);color:var(--brass-light);}
+  .name-cell.done{background:rgba(91,154,95,0.24);border-color:var(--green-ok);color:var(--green-ok);font-weight:600;}
+  .cell-input{
+    width:100%;background:var(--board-darker);border:1px solid var(--brass);border-radius:6px;
+    color:var(--chalk);font-size:11px;padding:6px 4px;font-family:'Inter',sans-serif;outline:none;text-align:center;
+  }
+  .cell-select{
+    width:100%;background:var(--board-darker);border:1px solid var(--brass);border-radius:6px;
+    color:var(--chalk);font-size:11px;padding:5px 3px;font-family:'Inter',sans-serif;outline:none;
+  }
+  .cell-select option{background:var(--board-dark);color:var(--chalk);}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--chalk-dim);margin:-4px 0 18px 4px;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend i{width:11px;height:11px;border-radius:3px;display:inline-block;}
+  .legend i.dot-empty{background:transparent;border:1px dashed var(--chalk-faint);}
+  .legend i.dot-pending{background:rgba(244,241,232,0.12);border:1px solid var(--line);}
+  .legend i.dot-partial{background:rgba(201,162,39,0.35);border:1px solid var(--brass);}
+  .legend i.dot-done{background:rgba(91,154,95,0.4);border:1px solid var(--green-ok);}
+
+  /* Guru + Report panel */
+  .admin-panel{background:var(--board-dark);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:18px;display:none;}
+  .admin-panel .eyebrow{margin-bottom:10px;}
+  .report-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+  .report-row:last-child{margin-bottom:0;}
+  .report-row input[type=month]{background:var(--board-darker);border:1px solid var(--line);border-radius:8px;color:var(--chalk);padding:8px 10px;font-family:'Inter',sans-serif;font-size:13px;outline:none;}
+  .report-row input[type=text]{flex:1;min-width:160px;background:var(--board-darker);border:1px solid var(--line);border-radius:8px;color:var(--chalk);padding:9px 12px;font-size:13.5px;font-family:'Inter',sans-serif;outline:none;}
+  .report-row input[type=text]:focus{border-color:var(--brass);}
+  .btn-small{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:0.04em;text-transform:uppercase;background:linear-gradient(180deg, var(--brass-light), var(--brass));color:var(--board-darker);border:none;border-radius:8px;padding:9px 14px;cursor:pointer;font-weight:600;}
+  .bulk-guru-wrap{display:none;margin-bottom:10px;}
+  .bulk-guru-wrap textarea{min-height:90px;}
+  .guru-tag-wrap{display:flex;flex-wrap:wrap;gap:8px;}
+  .guru-tag{display:inline-flex;align-items:center;gap:6px;background:rgba(201,162,39,0.15);border:1px solid var(--brass);color:var(--brass-light);font-size:12.5px;padding:5px 10px;border-radius:999px;}
+  .guru-tag button{background:none;border:none;color:var(--brass-light);cursor:pointer;font-size:13px;line-height:1;padding:0;}
+  .guru-tag button:hover{color:var(--red-flag);}
+  .guru-empty-note{font-size:12.5px;color:var(--chalk-faint);font-style:italic;}
+
+  /* Search */
+  .search-panel{background:var(--board-dark);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:20px;}
+  .search-panel label{display:block;font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--brass-light);margin-bottom:8px;}
+  .search-panel input{width:100%;background:var(--board-darker);border:1px solid var(--line);border-radius:8px;padding:10px 12px;color:var(--chalk);font-size:14px;font-family:'Inter',sans-serif;outline:none;margin-bottom:8px;}
+  .search-panel input:focus{border-color:var(--brass);}
+  .search-empty{color:var(--chalk-faint);font-style:italic;font-size:13px;padding:4px 0 6px;}
+  .result-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);gap:8px;}
+  .result-row:last-child{border-bottom:none;}
+  .result-row b{color:var(--chalk);font-weight:600;}
+  .result-row span.loc{color:var(--chalk-dim);font-size:13px;}
+  .result-row button{background:none;border:1px solid var(--brass);color:var(--brass-light);border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap;}
+
+  footer{text-align:center;font-size:11.5px;color:var(--chalk-faint);margin-top:8px;}
+
+  .overlay{position:fixed;inset:0;background:rgba(10,20,18,0.72);display:none;align-items:center;justify-content:center;padding:16px;z-index:50;}
+  .overlay.show{display:flex;}
+  .modal{background:var(--board-dark);border:1px solid var(--line);border-radius:16px;max-width:520px;width:100%;max-height:88vh;overflow-y:auto;padding:22px;box-shadow:0 30px 60px -20px rgba(0,0,0,0.6);}
+  .modal-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;}
+  .modal-head h2{font-family:'Oswald',sans-serif;font-size:19px;margin:0;color:var(--chalk);}
+  .modal-head .sub{font-size:12.5px;color:var(--chalk-dim);margin-top:3px;}
+  .close-x{background:none;border:none;color:var(--chalk-dim);font-size:20px;cursor:pointer;line-height:1;padding:2px 6px;}
+  .close-x:hover{color:var(--red-flag);}
+
+  .jam-tabs{display:flex;gap:5px;flex-wrap:wrap;margin:16px 0 14px;}
+  .jam-tab{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--chalk-dim);font-family:'Oswald',sans-serif;font-size:13px;cursor:pointer;}
+  .jam-tab:hover{border-color:var(--brass);}
+  .jam-tab.active{background:linear-gradient(180deg, var(--brass-light), var(--brass));color:var(--board-darker);font-weight:700;border-color:var(--brass);}
+  .jam-tab.has-progress:not(.active)::after{content:'';display:block;width:5px;height:5px;border-radius:50%;background:var(--green-ok);margin:2px auto 0;}
+  .jam-tab.no-guru{opacity:0.35;}
+
+  .empty-msg{color:var(--chalk-faint);font-style:italic;font-size:13px;padding:14px 0;text-align:center;}
+
+  .task-list{display:flex;flex-direction:column;gap:8px;margin-bottom:16px;}
+  .task-item{display:flex;align-items:flex-start;gap:10px;background:rgba(244,241,232,0.05);border:1px solid var(--line);border-radius:8px;padding:10px 12px;cursor:pointer;}
+  .task-item input{margin-top:2px;accent-color:var(--brass);width:16px;height:16px;flex:0 0 auto;}
+  .task-item span{font-size:13.5px;color:var(--chalk);line-height:1.4;}
+  .task-item.checked span{color:var(--chalk-dim);text-decoration:line-through;}
+
+  .note-label{display:block;font-family:'Oswald',sans-serif;font-size:11.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--brass-light);margin-bottom:6px;}
+  textarea{width:100%;background:var(--board-darker);border:1px solid var(--line);border-radius:8px;color:var(--chalk);font-family:'Inter',sans-serif;font-size:13.5px;padding:10px 12px;min-height:70px;resize:vertical;outline:none;}
+  textarea:focus{border-color:var(--brass);}
+  .save-hint{font-size:11px;color:var(--chalk-faint);margin-top:6px;font-style:italic;}
+
+  .login-modal{max-width:320px;text-align:center;}
+  .login-modal input{width:100%;background:var(--board-darker);border:1px solid var(--line);border-radius:8px;color:var(--chalk);padding:10px 12px;font-size:14px;margin:14px 0 10px;outline:none;text-align:center;}
+  .login-modal input:focus{border-color:var(--brass);}
+  .login-modal .err{color:var(--red-flag);font-size:12px;min-height:16px;margin-bottom:6px;}
+  .primary-btn{background:linear-gradient(180deg, var(--brass-light), var(--brass));color:var(--board-darker);border:none;border-radius:8px;padding:10px 18px;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:0.05em;text-transform:uppercase;font-weight:600;cursor:pointer;width:100%;}
+
+  @media (max-width:520px){ h1{font-size:24px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <span class="eyebrow">Papan Digital · Senin–Jumat · Jam ke-0 s/d 9</span>
+      <h1>Papan Piket Guru</h1>
+      <div class="status" id="statusMsg">Menyambungkan ke server…</div>
+    </div>
+    <button class="admin-btn" id="adminBtn" title="Kunci sederhana untuk mencegah perubahan tanpa sengaja">Mode Admin</button>
+  </header>
+
+  <div id="fallbackBanner" style="display:none;background:rgba(193,68,60,0.16);border:1px solid var(--red-flag);color:var(--chalk);border-radius:10px;padding:10px 14px;font-size:12.5px;margin-bottom:16px;line-height:1.5;">
+    ⚠ Tidak bisa tersambung ke server pusat (Firebase). Data sementara hanya tersimpan di browser ini dan <b>tidak tersinkron</b> ke perangkat lain.
+    <div id="fallbackDetail" style="margin-top:6px;font-family:monospace;font-size:11px;color:var(--chalk-dim);word-break:break-word;"></div>
+    <button id="btnRetryFirebase" style="margin-top:8px;background:none;border:1px solid var(--red-flag);color:var(--chalk);border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">↻ Coba Sambungkan Lagi</button>
+  </div>
+
+  <div class="day-slide">
+    <button class="arrow-btn" id="prevDay">‹</button>
+    <div class="day-slide-label">
+      <span class="day-name" id="dayName">—</span>
+      <span class="day-date" id="dayDate">—</span>
+    </div>
+    <button class="arrow-btn" id="nextDay">›</button>
+  </div>
+  <div class="day-pills" id="dayPills"></div>
+
+  <div class="table-scroll">
+    <table>
+      <thead><tr id="tableHead"></tr></thead>
+      <tbody id="gridBody"></tbody>
+    </table>
+  </div>
+  <div class="legend">
+    <span><i class="dot-empty"></i> Belum ada guru</span>
+    <span><i class="dot-pending"></i> Sudah diisi, belum dicek</span>
+    <span><i class="dot-partial"></i> Sebagian tugas dicek</span>
+    <span><i class="dot-done"></i> Semua tugas selesai</span>
+  </div>
+
+  <div class="admin-panel" id="guruPanel">
+    <span class="eyebrow">Kelola Daftar Guru</span>
+    <p style="font-size:12.5px;color:var(--chalk-dim);margin:-4px 0 12px;">Tambahkan nama di sini, lalu sel jadwal di atas akan berupa dropdown pilihan — tidak perlu mengetik ulang.</p>
+    <div class="report-row">
+      <input type="text" id="guruSingleInput" placeholder="Ketik satu nama guru...">
+      <button class="btn-small" id="btnAddGuru">Tambah</button>
+      <button class="admin-btn" id="btnToggleBulkGuru">Upload Banyak Nama</button>
+    </div>
+    <div class="bulk-guru-wrap" id="bulkGuruWrap">
+      <textarea id="bulkGuruArea" placeholder="Tempel daftar nama guru, satu nama per baris"></textarea>
+      <div style="margin-top:8px;display:flex;gap:8px;">
+        <button class="btn-small" id="btnSaveBulkGuru">Simpan Daftar</button>
+        <button class="admin-btn" id="btnCancelBulkGuru">Batal</button>
+      </div>
+    </div>
+    <div class="guru-tag-wrap" id="guruTagWrap"></div>
+  </div>
+
+  <div class="admin-panel" id="reportPanel">
+    <span class="eyebrow">Laporan Admin</span>
+    <div class="report-row">
+      <button class="btn-small" id="btnHarian">Unduh Laporan Hari Ini (.xlsx)</button>
+      <span style="font-size:12px;color:var(--chalk-dim);">— untuk hari yang sedang ditampilkan</span>
+    </div>
+    <div class="report-row">
+      <input type="month" id="monthPicker">
+      <button class="btn-small" id="btnBulanan">Unduh Laporan Bulanan (.xlsx)</button>
+    </div>
+  </div>
+
+  <section class="search-panel">
+    <label for="searchInput">Cari jadwal guru</label>
+    <input id="searchInput" type="text" placeholder="Ketik nama guru…" autocomplete="off">
+    <div id="searchResults"><div class="search-empty">Ketik nama untuk melihat hari, lokasi, dan jam piketnya.</div></div>
+  </section>
+
+  <footer>Data tersimpan terpusat dan tersinkron real-time ke semua perangkat yang membuka papan ini.</footer>
+</div>
+
+<div class="overlay" id="taskOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <h2 id="taskTitle">—</h2>
+        <div class="sub" id="taskSub">—</div>
+      </div>
+      <button class="close-x" id="taskClose">×</button>
+    </div>
+    <div class="jam-tabs" id="jamTabs"></div>
+    <div id="taskBodyWrap">
+      <div class="task-list" id="taskList"></div>
+      <label class="note-label" for="noteArea">Catatan / Keterangan</label>
+      <textarea id="noteArea" placeholder="Tulis catatan untuk jam ini…"></textarea>
+      <div class="save-hint">Tersimpan otomatis</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="loginOverlay">
+  <div class="modal login-modal">
+    <div class="modal-head" style="justify-content:center;">
+      <h2>Masuk Mode Admin</h2>
+      <button class="close-x" id="loginClose">×</button>
+    </div>
+    <div class="sub">Hanya admin/petugas piket yang boleh mengisi nama guru & mengunduh laporan.</div>
+    <input id="loginInput" type="password" placeholder="Kata sandi admin">
+    <div class="err" id="loginErr"></div>
+    <button class="primary-btn" id="loginSubmit">Masuk</button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   KONFIGURASI FIREBASE — WAJIB DIISI SEBELUM DI-HOSTING
+   Ambil dari: Firebase Console > Project Settings > General
+   > "Your apps" > SDK setup and configuration > Config
+   ============================================================ */
+const firebaseConfig = {
+  apiKey: "AIzaSyDRhZgKQEHbxRvNegx1qwM6ux2UMUNL6Os",
+  authDomain: "piket-guru-pribadi.firebaseapp.com",
+  databaseURL: "https://piket-guru-pribadi-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "piket-guru-pribadi",
+  storageBucket: "piket-guru-pribadi.firebasestorage.app",
+  messagingSenderId: "714515856915",
+  appId: "1:714515856915:web:00a509ccff051217fbc9e6"
+};
+let db = null;
+let auth = null;
+let firebaseReady = false;
+let firebaseInitError = "";
+try{
+  if(typeof firebase === 'undefined'){
+    throw new Error('SDK Firebase (firebase-app-compat.js dkk) gagal dimuat dari CDN gstatic.com');
+  }
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.database();
+  auth = firebase.auth();
+  firebaseReady = true;
+}catch(e){
+  console.error('Firebase init gagal, jatuh ke mode cadangan (localStorage):', e);
+  firebaseReady = false;
+  firebaseInitError = (e && e.message) ? e.message : String(e);
+}
+/* ============================================================ */
+
+const DATA_PATH = "piketData";
+const GURU_PATH = "guruList";
+
+function ensureAuth(){
+  if(!firebaseReady) return Promise.reject(new Error('Firebase tidak tersedia'));
+  return new Promise((resolve, reject)=>{
+    const unsub = auth.onAuthStateChanged(user=>{
+      if(user){ unsub(); resolve(user); }
+    });
+    auth.signInAnonymously().catch(err=>{ unsub(); reject(err); });
+  });
+}
+
+const DAYS = ["Senin","Selasa","Rabu","Kamis","Jumat"];
+const JAM_MIN = 0;
+const JAM_MAX = 9;
+const JAM_COUNT = JAM_MAX - JAM_MIN + 1; // jam ke-0 s/d jam ke-9 = 10 slot
+const ADMIN_PASSWORD = "piket123"; // ganti sesuai kebutuhan sekolah
+const BULAN_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
+const WEEKDAY_BY_JSDAY = {1:"Senin",2:"Selasa",3:"Rabu",4:"Kamis",5:"Jumat"};
+
+const LOCATIONS = [
+  {key:"LANTAI 1 DAN LAPANGAN", label:"LANTAI 1 DAN LAPANGAN", tasks:[
+    "Memastikan Pengumpulan HP Siswa",
+    "Menulis siswa yang terlambat",
+    "Memastikan siswa tidak berkeliaran di area lobi, klinik dan lapangan"
+  ]},
+  {key:"LANTAI 2", label:"LANTAI 2", tasks:[
+    "Memastikan kehadiran guru - Kelas 10A",
+    "Memastikan kehadiran guru - Kelas 7A",
+    "Memastikan kehadiran guru - Kelas 8A",
+    "Memastikan kehadiran guru - Kelas 9A",
+    "Memastikan kondusifitas kegiatan di Lantai 2"
+  ]},
+  {key:"LANTAI 3", label:"LANTAI 3", tasks:[
+    "Memastikan kehadiran guru - Kelas 11A",
+    "Memastikan kehadiran guru - Kelas 11B",
+    "Memastikan kehadiran guru - Kelas 12A",
+    "Memastikan kehadiran guru - Kelas 12B",
+    "Memastikan kehadiran guru - Kelas Elektif",
+    "Memastikan kondusifitas Lantai 3",
+    "Memastikan siswa tidak berada di area kantin saat jam pelajaran"
+  ]},
+  {key:"LANTAI 4-5", label:"LANTAI 4-5", tasks:[
+    "Memastikan kehadiran guru - Kelas 7B",
+    "Memastikan kehadiran guru - Kelas 8B",
+    "Memastikan kehadiran guru - Kelas 9B",
+    "Memastikan kehadiran guru - Kelas 10B",
+    "Memastikan kehadiran guru - Kelas 10C",
+    "Memastikan kehadiran guru - Kelas 11C",
+    "Memastikan kehadiran guru - Kelas 11D",
+    "Memastikan kehadiran guru - Kelas 12C",
+    "Memastikan kondusifitas Lantai 5 (Laboratorium, Main Hall dan Perpustakaan)",
+    "Memastikan siswa tidak berada di area kantin saat jam pelajaran"
+  ]},
+];
+
+// Lokasi & jam tertentu membutuhkan 2 guru piket sekaligus.
+// Lantai 1 dan Lapangan: jam ke-0, jam ke-1, dan jam ke-9 diisi 2 orang guru.
+function slotCount(locKey, jam){
+  if(locKey === "LANTAI 1 DAN LAPANGAN" && (jam===0 || jam===1 || jam===9)) return 2;
+  return 1;
+}
+
+let state = { assignments:{}, logs:{} };
+let guruList = [];
+let isAdmin = false;
+let currentTask = null; // {dateISO, weekday, locKey, jam}
+let activeDayIndex = 0;
+let weekDates = [];
+
+function initAssignments(){
+  const a = {};
+  DAYS.forEach(d=>{
+    a[d] = {};
+    LOCATIONS.forEach(l=>{
+      a[d][l.key] = {};
+      for(let j=JAM_MIN;j<=JAM_MAX;j++){
+        a[d][l.key][j] = new Array(slotCount(l.key, j)).fill("");
+      }
+    });
+  });
+  return a;
+}
+
+function pad2(n){ return String(n).padStart(2,'0'); }
+function isoDate(d){ return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function formatTanggal(d){ return d.getDate()+' '+BULAN_ID[d.getMonth()]+' '+d.getFullYear(); }
+
+function getMonday(d){
+  const date = new Date(d);
+  const day = date.getDay();
+  const diff = day===0 ? -6 : 1-day;
+  date.setDate(date.getDate()+diff);
+  date.setHours(0,0,0,0);
+  return date;
+}
+function computeWeekDates(){
+  const monday = getMonday(new Date());
+  return DAYS.map((_,i)=>{
+    const d = new Date(monday);
+    d.setDate(monday.getDate()+i);
+    return d;
+  });
+}
+function computeDefaultDayIndex(){
+  const jsDay = new Date().getDay();
+  return (jsDay>=1 && jsDay<=5) ? jsDay-1 : 0;
+}
+
+function getProgress(dateISO, locKey, jam){
+  state.logs[dateISO] = state.logs[dateISO] || {};
+  state.logs[dateISO][locKey] = state.logs[dateISO][locKey] || {};
+  state.logs[dateISO][locKey][jam] = state.logs[dateISO][locKey][jam] || {checked:{}, note:""};
+  return state.logs[dateISO][locKey][jam];
+}
+function jamStatus(dateISO, loc, jam){
+  const log = state.logs[dateISO] && state.logs[dateISO][loc.key] && state.logs[dateISO][loc.key][jam];
+  if(!log) return 'pending';
+  const total = loc.tasks.length;
+  const checkedCount = loc.tasks.reduce((acc,_,i)=> acc + ((log.checked && log.checked[i]) ? 1 : 0), 0);
+  if(checkedCount===0) return 'pending';
+  if(checkedCount===total) return 'done';
+  return 'partial';
+}
+function hasAnyProgress(dateISO, locKey, jam){
+  const p = state.logs[dateISO] && state.logs[dateISO][locKey] && state.logs[dateISO][locKey][jam];
+  if(!p) return false;
+  const anyChecked = Object.values(p.checked||{}).some(v=>v);
+  return anyChecked || !!(p.note && p.note.trim());
+}
+
+function applyRemoteAssignments(parsed){
+  parsed = parsed || {};
+  state.assignments = parsed.assignments || initAssignments();
+  state.logs = parsed.logs || {};
+  DAYS.forEach(d=>{
+    state.assignments[d] = state.assignments[d] || {};
+    LOCATIONS.forEach(l=>{
+      state.assignments[d][l.key] = state.assignments[d][l.key] || {};
+      for(let j=JAM_MIN;j<=JAM_MAX;j++){
+        const need = slotCount(l.key, j);
+        let cur = state.assignments[d][l.key][j];
+        if(!Array.isArray(cur)){
+          cur = (typeof cur === 'string' && cur) ? [cur] : [];
+        }
+        while(cur.length < need) cur.push("");
+        if(cur.length > need) cur = cur.slice(0, need);
+        state.assignments[d][l.key][j] = cur;
+      }
+    });
+  });
+}
+
+let dataListenerAttached = false;
+function loadDataLocalFallback(extraErrorMsg){
+  const statusEl = document.getElementById('statusMsg');
+  const banner = document.getElementById('fallbackBanner');
+  const detail = document.getElementById('fallbackDetail');
+  if(banner) banner.style.display = 'block';
+  if(detail) detail.textContent = 'Detail teknis: ' + (extraErrorMsg || firebaseInitError || 'tidak diketahui');
+  try{
+    const raw = localStorage.getItem('piket-guru-data-fallback');
+    applyRemoteAssignments(raw ? JSON.parse(raw) : null);
+  }catch(e){
+    state.assignments = initAssignments();
+  }
+  statusEl.textContent = "⚠ Mode cadangan: tersimpan hanya di browser ini (gagal tersambung ke server pusat)";
+}
+async function loadData(){
+  const statusEl = document.getElementById('statusMsg');
+  if(!firebaseReady){ loadDataLocalFallback(); return; }
+  try{
+    await ensureAuth();
+    const snap = await db.ref(DATA_PATH).once('value');
+    applyRemoteAssignments(snap.val());
+    statusEl.textContent = "Tersambung · data terpusat, real-time ke semua perangkat";
+
+    if(!dataListenerAttached){
+      dataListenerAttached = true;
+      db.ref(DATA_PATH).on('value', s=>{
+        applyRemoteAssignments(s.val());
+        renderAll();
+        statusEl.textContent = "Tersambung · data terpusat, real-time ke semua perangkat";
+      });
+    }
+  }catch(e){
+    console.error(e);
+    loadDataLocalFallback((e && e.message) ? e.message : String(e));
+  }
+}
+function saveData(){
+  const statusEl = document.getElementById('statusMsg');
+  if(!firebaseReady){
+    try{
+      localStorage.setItem('piket-guru-data-fallback', JSON.stringify(state));
+      statusEl.textContent = "⚠ Mode cadangan: tersimpan hanya di browser ini (gagal tersambung ke server pusat)";
+    }catch(e){
+      statusEl.textContent = "Gagal menyimpan (penyimpanan browser penuh/diblokir)";
+    }
+    return;
+  }
+  statusEl.textContent = "Menyimpan…";
+  db.ref(DATA_PATH).set(state)
+    .then(()=>{ statusEl.textContent = "Tersambung · data terpusat, real-time ke semua perangkat"; })
+    .catch(err=>{
+      console.error(err);
+      statusEl.textContent = "Gagal menyimpan (cek koneksi / aturan akses Firebase)";
+    });
+}
+
+let guruListenerAttached = false;
+async function loadGuruList(){
+  if(!firebaseReady){
+    try{
+      const raw = localStorage.getItem('piket-guru-nama-fallback');
+      guruList = raw ? JSON.parse(raw) : [];
+    }catch(e){ guruList = []; }
+    return;
+  }
+  try{
+    await ensureAuth();
+    const snap = await db.ref(GURU_PATH).once('value');
+    guruList = snap.val() || [];
+
+    if(!guruListenerAttached){
+      guruListenerAttached = true;
+      db.ref(GURU_PATH).on('value', s=>{
+        guruList = s.val() || [];
+        renderGuruPanel();
+        renderGrid();
+      });
+    }
+  }catch(e){
+    console.error(e);
+    guruList = [];
+  }
+}
+function saveGuruList(){
+  if(!firebaseReady){
+    try{ localStorage.setItem('piket-guru-nama-fallback', JSON.stringify(guruList)); }catch(e){}
+    return;
+  }
+  db.ref(GURU_PATH).set(guruList).catch(err=>console.error(err));
+}
+
+function escapeHtml(str){
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function renderGuruPanel(){
+  const wrap = document.getElementById('guruTagWrap');
+  wrap.innerHTML = "";
+  if(guruList.length===0){
+    wrap.innerHTML = '<span class="guru-empty-note">Belum ada nama guru ditambahkan.</span>';
+    return;
+  }
+  guruList.forEach(name=>{
+    const tag = document.createElement('span');
+    tag.className = 'guru-tag';
+    tag.innerHTML = escapeHtml(name) + ' <button title="Hapus dari daftar">×</button>';
+    tag.querySelector('button').onclick = ()=>{
+      guruList = guruList.filter(g=>g!==name);
+      saveGuruList();
+      renderGuruPanel();
+      renderGrid();
+    };
+    wrap.appendChild(tag);
+  });
+}
+
+function renderDaySlide(){
+  const idx = activeDayIndex;
+  const date = weekDates[idx];
+  const todayIdx = computeDefaultDayIndex();
+  const jsDay = new Date().getDay();
+  const isToday = (jsDay>=1 && jsDay<=5) && idx===todayIdx;
+
+  document.getElementById('dayName').textContent = DAYS[idx] + (isToday ? ' · Hari ini' : '');
+  document.getElementById('dayDate').textContent = formatTanggal(date);
+  document.getElementById('prevDay').disabled = idx===0;
+  document.getElementById('nextDay').disabled = idx===DAYS.length-1;
+
+  const pills = document.getElementById('dayPills');
+  pills.innerHTML = "";
+  DAYS.forEach((d,i)=>{
+    const btn = document.createElement('button');
+    btn.className = 'day-pill' + (i===idx?' active':'') + (i===todayIdx?' today':'');
+    btn.title = d;
+    btn.onclick = ()=>{ activeDayIndex = i; renderAll(); };
+    pills.appendChild(btn);
+  });
+}
+
+function renderGrid(){
+  const weekday = DAYS[activeDayIndex];
+  const date = weekDates[activeDayIndex];
+  const dISO = isoDate(date);
+
+  const head = document.getElementById('tableHead');
+  head.innerHTML = '<th>Lokasi</th>' + Array.from({length:JAM_COUNT},(_,i)=>'<th>Jam ke-'+(JAM_MIN+i)+'</th>').join('');
+
+  const body = document.getElementById('gridBody');
+  body.innerHTML = "";
+
+  LOCATIONS.forEach(loc=>{
+    const tr = document.createElement('tr');
+    const th = document.createElement('td');
+    th.className = 'loc-head';
+    th.innerHTML = '<div class="loc-title">'+loc.label+'</div>';
+    tr.appendChild(th);
+
+    for(let j=JAM_MIN;j<=JAM_MAX;j++){
+      const td = document.createElement('td');
+      td.className = 'jam-cell';
+      const need = slotCount(loc.key, j);
+      const arr = state.assignments[weekday][loc.key][j] || [];
+
+      const stack = document.createElement('div');
+      stack.className = 'slot-stack';
+
+      for(let s=0; s<need; s++){
+        const guru = arr[s] || "";
+
+        if(isAdmin){
+          const select = document.createElement('select');
+          select.className = 'cell-select';
+          let optionsHtml = '<option value="">– Kosongkan –</option>';
+          guruList.forEach(name=>{
+            const sel = name===guru ? ' selected' : '';
+            optionsHtml += '<option value="'+escapeHtml(name)+'"'+sel+'>'+escapeHtml(name)+'</option>';
+          });
+          if(guru && !guruList.includes(guru)){
+            optionsHtml += '<option value="'+escapeHtml(guru)+'" selected>'+escapeHtml(guru)+' (belum di daftar)</option>';
+          }
+          select.innerHTML = optionsHtml;
+          select.addEventListener('change', ()=>{
+            const cur = state.assignments[weekday][loc.key][j] || [];
+            cur[s] = select.value;
+            state.assignments[weekday][loc.key][j] = cur;
+            saveData();
+            renderGrid();
+          });
+          stack.appendChild(select);
+        } else {
+          const btn = document.createElement('button');
+          if(!guru){
+            btn.className = 'name-cell empty';
+            btn.textContent = '–';
+            btn.disabled = true;
+          } else {
+            const status = jamStatus(dISO, loc, j);
+            btn.className = 'name-cell ' + status;
+            btn.textContent = guru;
+            btn.title = guru + ' · Jam ke-' + j;
+            btn.onclick = ()=> openTaskModal(dISO, weekday, loc.key, j);
+          }
+          stack.appendChild(btn);
+        }
+      }
+      td.appendChild(stack);
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  });
+}
+
+function renderAll(){
+  renderDaySlide();
+  renderGrid();
+}
+
+function openTaskModal(dateISO, weekday, locKey, jam){
+  currentTask = { dateISO, weekday, locKey, jam: (jam===undefined || jam===null) ? JAM_MIN : jam };
+  renderJamTabs();
+  renderTaskHeaderAndBody();
+  document.getElementById('taskOverlay').classList.add('show');
+}
+function renderJamTabs(){
+  const wrap = document.getElementById('jamTabs');
+  wrap.innerHTML = "";
+  const weekday = currentTask.weekday, locKey = currentTask.locKey;
+  for(let j=JAM_MIN;j<=JAM_MAX;j++){
+    const btn = document.createElement('button');
+    const active = j === currentTask.jam;
+    const has = hasAnyProgress(currentTask.dateISO, locKey, j);
+    const guruArr = (state.assignments[weekday][locKey][j] || []).filter(n=>n);
+    const guruThisJam = guruArr.join(' & ');
+    btn.className = 'jam-tab' + (active?' active':'') + (has?' has-progress':'') + (!guruArr.length?' no-guru':'');
+    btn.textContent = j;
+    btn.title = 'Jam ke-' + j + (guruThisJam ? (' · '+guruThisJam) : ' · belum ada guru');
+    btn.onclick = ()=>{ currentTask.jam = j; renderJamTabs(); renderTaskHeaderAndBody(); };
+    wrap.appendChild(btn);
+  }
+}
+function renderTaskHeaderAndBody(){
+  const loc = LOCATIONS.find(l=>l.key===currentTask.locKey);
+  const date = weekDates[activeDayIndex];
+  const guruArr = (state.assignments[currentTask.weekday][currentTask.locKey][currentTask.jam] || []).filter(n=>n);
+  const guru = guruArr.join(' & ');
+
+  document.getElementById('taskTitle').textContent = guru || "Belum ada guru";
+  document.getElementById('taskSub').textContent = loc.label + ' · ' + currentTask.weekday + ', ' + formatTanggal(date) + ' · Jam ke-' + currentTask.jam;
+
+  const wrap = document.getElementById('taskBodyWrap');
+  if(!guru){
+    wrap.innerHTML = '<div class="empty-msg">Belum ada guru piket pada jam ini.</div>';
+    return;
+  }
+  wrap.innerHTML =
+    '<div class="task-list" id="taskList"></div>' +
+    '<label class="note-label" for="noteArea">Catatan / Keterangan</label>' +
+    '<textarea id="noteArea" placeholder="Tulis catatan untuk jam ini…"></textarea>' +
+    '<div class="save-hint">Tersimpan otomatis</div>';
+
+  const progress = getProgress(currentTask.dateISO, currentTask.locKey, currentTask.jam);
+  const listEl = document.getElementById('taskList');
+  loc.tasks.forEach((task, idx)=>{
+    const item = document.createElement('div');
+    const checked = !!progress.checked[idx];
+    item.className = 'task-item' + (checked ? ' checked' : '');
+    item.innerHTML = '<input type="checkbox" ' + (checked?'checked':'') + '><span>' + escapeHtml(task) + '</span>';
+    const cb = item.querySelector('input');
+    const toggle = ()=>{
+      progress.checked[idx] = !progress.checked[idx];
+      saveData();
+      renderTaskHeaderAndBody();
+      renderJamTabs();
+      renderGrid();
+    };
+    item.onclick = (e)=>{ if(e.target!==cb) toggle(); };
+    cb.onclick = (e)=>{ e.stopPropagation(); toggle(); };
+    listEl.appendChild(item);
+  });
+
+  const noteArea = document.getElementById('noteArea');
+  noteArea.value = progress.note || "";
+  noteArea.onblur = ()=>{
+    progress.note = noteArea.value;
+    saveData();
+    renderJamTabs();
+  };
+}
+function closeTaskModal(){
+  document.getElementById('taskOverlay').classList.remove('show');
+  currentTask = null;
+}
+
+function renderSearch(query){
+  const resultsEl = document.getElementById('searchResults');
+  const q = query.trim().toLowerCase();
+  if(!q){
+    resultsEl.innerHTML = '<div class="search-empty">Ketik nama untuk melihat hari, lokasi, dan jam piketnya.</div>';
+    return;
+  }
+  const matches = [];
+  DAYS.forEach((day,i)=>{
+    LOCATIONS.forEach(loc=>{
+      for(let j=JAM_MIN;j<=JAM_MAX;j++){
+        const arr = state.assignments[day][loc.key][j] || [];
+        arr.forEach(name=>{
+          if(name && name.toLowerCase().includes(q)){
+            matches.push({day, dayIdx:i, loc, jam:j, name});
+          }
+        });
+      }
+    });
+  });
+  if(matches.length===0){
+    resultsEl.innerHTML = '<div class="search-empty">Tidak ditemukan jadwal untuk nama tersebut.</div>';
+    return;
+  }
+  resultsEl.innerHTML = "";
+  matches.forEach(m=>{
+    const row = document.createElement('div');
+    row.className = 'result-row';
+    row.innerHTML = '<span><b>' + escapeHtml(m.name) + '</b> — <span class="loc">' + m.day + ' · ' + m.loc.label + ' · Jam ke-' + m.jam + '</span></span>';
+    const btn = document.createElement('button');
+    btn.textContent = 'Buka tugas';
+    btn.onclick = ()=>{
+      activeDayIndex = m.dayIdx;
+      renderAll();
+      const dISO = isoDate(weekDates[m.dayIdx]);
+      openTaskModal(dISO, m.day, m.loc.key, m.jam);
+    };
+    row.appendChild(btn);
+    resultsEl.appendChild(row);
+  });
+}
+
+function openLogin(){
+  document.getElementById('loginInput').value = "";
+  document.getElementById('loginErr').textContent = "";
+  document.getElementById('loginOverlay').classList.add('show');
+  setTimeout(()=>document.getElementById('loginInput').focus(), 50);
+}
+function closeLogin(){ document.getElementById('loginOverlay').classList.remove('show'); }
+function submitLogin(){
+  const val = document.getElementById('loginInput').value;
+  if(val === ADMIN_PASSWORD){
+    isAdmin = true;
+    closeLogin();
+    updateAdminBtn();
+    renderGrid();
+  } else {
+    document.getElementById('loginErr').textContent = "Kata sandi salah, coba lagi.";
+  }
+}
+function updateAdminBtn(){
+  const btn = document.getElementById('adminBtn');
+  btn.textContent = isAdmin ? 'Mode Admin: Aktif (Keluar)' : 'Mode Admin';
+  btn.classList.toggle('active', isAdmin);
+  document.getElementById('reportPanel').style.display = isAdmin ? 'block' : 'none';
+  document.getElementById('guruPanel').style.display = isAdmin ? 'block' : 'none';
+}
+
+document.getElementById('btnRetryFirebase').onclick = ()=> location.reload();
+document.getElementById('adminBtn').onclick = ()=>{
+  if(isAdmin){ isAdmin=false; updateAdminBtn(); renderGrid(); }
+  else { openLogin(); }
+};
+document.getElementById('loginClose').onclick = closeLogin;
+document.getElementById('loginSubmit').onclick = submitLogin;
+document.getElementById('loginInput').addEventListener('keydown', e=>{ if(e.key==='Enter') submitLogin(); });
+document.getElementById('loginOverlay').addEventListener('click', e=>{ if(e.target.id==='loginOverlay') closeLogin(); });
+document.getElementById('taskClose').onclick = closeTaskModal;
+document.getElementById('taskOverlay').addEventListener('click', e=>{ if(e.target.id==='taskOverlay') closeTaskModal(); });
+document.getElementById('searchInput').addEventListener('input', e=> renderSearch(e.target.value));
+document.getElementById('prevDay').onclick = ()=>{ if(activeDayIndex>0){ activeDayIndex--; renderAll(); } };
+document.getElementById('nextDay').onclick = ()=>{ if(activeDayIndex<DAYS.length-1){ activeDayIndex++; renderAll(); } };
+
+document.getElementById('btnAddGuru').onclick = ()=>{
+  const input = document.getElementById('guruSingleInput');
+  const name = input.value.trim();
+  if(!name) return;
+  if(!guruList.includes(name)) guruList.push(name);
+  input.value = "";
+  saveGuruList();
+  renderGuruPanel();
+};
+document.getElementById('guruSingleInput').addEventListener('keydown', e=>{ if(e.key==='Enter') document.getElementById('btnAddGuru').click(); });
+document.getElementById('btnToggleBulkGuru').onclick = ()=>{
+  const w = document.getElementById('bulkGuruWrap');
+  w.style.display = (w.style.display==='block') ? 'none' : 'block';
+};
+document.getElementById('btnCancelBulkGuru').onclick = ()=>{
+  document.getElementById('bulkGuruArea').value = "";
+  document.getElementById('bulkGuruWrap').style.display = 'none';
+};
+document.getElementById('btnSaveBulkGuru').onclick = ()=>{
+  const text = document.getElementById('bulkGuruArea').value;
+  const names = text.split('\n').map(n=>n.trim()).filter(n=>n.length>0);
+  names.forEach(n=>{ if(!guruList.includes(n)) guruList.push(n); });
+  document.getElementById('bulkGuruArea').value = "";
+  document.getElementById('bulkGuruWrap').style.display = 'none';
+  saveGuruList();
+  renderGuruPanel();
+};
+
+document.getElementById('btnHarian').onclick = ()=>{
+  const weekday = DAYS[activeDayIndex];
+  const date = weekDates[activeDayIndex];
+  const dISO = isoDate(date);
+  const rows = [["Lokasi","Jam","Guru","Status Checklist","Catatan"]];
+  LOCATIONS.forEach(loc=>{
+    for(let j=JAM_MIN;j<=JAM_MAX;j++){
+      const guru = (state.assignments[weekday][loc.key][j] || []).filter(n=>n).join(' & ');
+      if(!guru) continue;
+      const status = jamStatus(dISO, loc, j);
+      const statusLabel = status==='done' ? 'Selesai' : (status==='partial' ? 'Sebagian' : 'Belum dicek');
+      const log = state.logs[dISO] && state.logs[dISO][loc.key] && state.logs[dISO][loc.key][j];
+      const note = (log && log.note) ? log.note.trim() : '';
+      rows.push([loc.label, 'Jam ke-'+j, guru, statusLabel, note]);
+    }
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Harian');
+  XLSX.writeFile(wb, 'laporan-piket-'+dISO+'.xlsx');
+};
+
+document.getElementById('btnBulanan').onclick = ()=>{
+  const val = document.getElementById('monthPicker').value;
+  if(!val){ alert('Pilih bulan terlebih dahulu.'); return; }
+  const [y,m] = val.split('-').map(Number);
+  const rows = [["Tanggal","Hari","Lokasi","Jam","Guru","Status Checklist","Catatan"]];
+  const d = new Date(y, m-1, 1);
+  while(d.getMonth() === m-1){
+    const jsDay = d.getDay();
+    if(jsDay>=1 && jsDay<=5){
+      const weekday = WEEKDAY_BY_JSDAY[jsDay];
+      const dISO = isoDate(d);
+      LOCATIONS.forEach(loc=>{
+        for(let j=JAM_MIN;j<=JAM_MAX;j++){
+          const guru = (state.assignments[weekday][loc.key][j] || []).filter(n=>n).join(' & ');
+          if(!guru) continue;
+          const status = jamStatus(dISO, loc, j);
+          const statusLabel = status==='done' ? 'Selesai' : (status==='partial' ? 'Sebagian' : 'Belum dicek');
+          const log = state.logs[dISO] && state.logs[dISO][loc.key] && state.logs[dISO][loc.key][j];
+          const note = (log && log.note) ? log.note.trim() : '';
+          rows.push([formatTanggal(d), weekday, loc.label, 'Jam ke-'+j, guru, statusLabel, note]);
+        }
+      });
+    }
+    d.setDate(d.getDate()+1);
+  }
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Bulanan');
+  XLSX.writeFile(wb, 'laporan-piket-'+val+'.xlsx');
+};
+
+(async function init(){
+  weekDates = computeWeekDates();
+  activeDayIndex = computeDefaultDayIndex();
+  const mp = document.getElementById('monthPicker');
+  const now = new Date();
+  mp.value = now.getFullYear()+'-'+pad2(now.getMonth()+1);
+
+  await loadData();
+  await loadGuruList();
+  updateAdminBtn();
+  renderGuruPanel();
+  renderAll();
+})();
+</script>
+</body>
+</html>
