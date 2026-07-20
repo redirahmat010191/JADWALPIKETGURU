@@ -444,6 +444,30 @@ function hasAnyProgress(dateISO, locKey, jam){
   return anyChecked || !!(p.note && p.note.trim());
 }
 
+// Firebase Realtime Database mengubah array yang "bolong" (mis. hanya index 1
+// terisi, index 0 tidak pernah diisi) menjadi object biasa seperti {"1":"Budi"}
+// alih-alih array ["", "Budi"]. Fungsi ini memulihkan data itu menjadi array
+// yang benar lagi, supaya nama guru yang sudah diketik/dipilih tidak hilang.
+function toGuruArray(raw, need){
+  let cur;
+  if(Array.isArray(raw)){
+    cur = raw.slice();
+  } else if(raw && typeof raw === 'object'){
+    cur = [];
+    Object.keys(raw).forEach(k=>{
+      const idx = parseInt(k, 10);
+      if(!isNaN(idx)) cur[idx] = raw[k];
+    });
+  } else if(typeof raw === 'string' && raw){
+    cur = [raw];
+  } else {
+    cur = [];
+  }
+  const out = [];
+  for(let i=0;i<need;i++){ out[i] = cur[i] || ""; }
+  return out;
+}
+
 function applyRemoteAssignments(parsed){
   parsed = parsed || {};
   state.assignments = parsed.assignments || initAssignments();
@@ -454,13 +478,7 @@ function applyRemoteAssignments(parsed){
       state.assignments[d][l.key] = state.assignments[d][l.key] || {};
       for(let j=JAM_MIN;j<=JAM_MAX;j++){
         const need = slotCount(l.key, j);
-        let cur = state.assignments[d][l.key][j];
-        if(!Array.isArray(cur)){
-          cur = (typeof cur === 'string' && cur) ? [cur] : [];
-        }
-        while(cur.length < need) cur.push("");
-        if(cur.length > need) cur = cur.slice(0, need);
-        state.assignments[d][l.key][j] = cur;
+        state.assignments[d][l.key][j] = toGuruArray(state.assignments[d][l.key][j], need);
       }
     });
   });
@@ -651,7 +669,7 @@ function renderGrid(){
           }
           select.innerHTML = optionsHtml;
           select.addEventListener('change', ()=>{
-            const cur = state.assignments[weekday][loc.key][j] || [];
+            const cur = toGuruArray(state.assignments[weekday][loc.key][j], need);
             cur[s] = select.value;
             state.assignments[weekday][loc.key][j] = cur;
             saveData();
