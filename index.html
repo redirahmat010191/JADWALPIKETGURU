@@ -171,7 +171,7 @@
 
   <header>
     <div>
-      <span class="eyebrow">Papan Digital · Senin–Jumat · Jam ke-0 s/d 9</span>
+      <span class="eyebrow">Papan Digital · Senin–Jumat · Jam ke-0 s/d 9 · <span style="opacity:.6;">build 2026-07-21-v2</span></span>
       <h1>Papan Piket Guru</h1>
       <div class="status" id="statusMsg">Menyambungkan ke server…</div>
     </div>
@@ -214,6 +214,8 @@
       <input type="text" id="guruSingleInput" placeholder="Ketik satu nama guru...">
       <button class="btn-small" id="btnAddGuru">Tambah</button>
       <button class="admin-btn" id="btnToggleBulkGuru">Upload Banyak Nama</button>
+      <button class="admin-btn" id="btnUploadExcelGuru">Upload dari Excel</button>
+      <input type="file" id="excelGuruInput" accept=".xlsx,.xls,.csv" style="display:none;">
     </div>
     <div class="bulk-guru-wrap" id="bulkGuruWrap">
       <textarea id="bulkGuruArea" placeholder="Tempel daftar nama guru, satu nama per baris"></textarea>
@@ -576,6 +578,23 @@ function saveGuruList(){
   db.ref(GURU_PATH).set(guruList).catch(err=>console.error(err));
 }
 
+function extractNamesFromSheetRows(rows){
+  const skipWords = new Set(['nama','nama guru','no','nomor','no.','nip','nuptk','jabatan','mapel','keterangan']);
+  const names = [];
+  rows.forEach(row=>{
+    if(!Array.isArray(row)) return;
+    row.forEach(cell=>{
+      if(typeof cell !== 'string' && typeof cell !== 'number') return;
+      const val = String(cell).trim();
+      if(!val) return;
+      if(skipWords.has(val.toLowerCase())) return;
+      if(/^\d+([.,]\d+)?$/.test(val)) return; // lewati sel berisi angka murni (nomor urut, dll)
+      names.push(val);
+    });
+  });
+  return names;
+}
+
 function escapeHtml(str){
   const d = document.createElement('div');
   d.textContent = str;
@@ -706,9 +725,18 @@ function renderAll(){
 
 function openTaskModal(dateISO, weekday, locKey, jam){
   currentTask = { dateISO, weekday, locKey, jam: (jam===undefined || jam===null) ? JAM_MIN : jam };
-  renderJamTabs();
-  renderTaskHeaderAndBody();
   document.getElementById('taskOverlay').classList.add('show');
+  try{
+    renderJamTabs();
+    renderTaskHeaderAndBody();
+  }catch(err){
+    console.error('Gagal membuka detail tugas:', err);
+    document.getElementById('taskTitle').textContent = 'Terjadi kesalahan';
+    document.getElementById('taskSub').textContent = weekday + ' · ' + locKey + ' · Jam ke-' + jam;
+    document.getElementById('taskBodyWrap').innerHTML =
+      '<div class="empty-msg">Gagal menampilkan tugas untuk sel ini.<br><br>' +
+      '<span style="font-family:monospace;font-size:11px;color:#e08;word-break:break-all;">' + escapeHtml(String(err && err.message ? err.message : err)) + '</span></div>';
+  }
 }
 function renderJamTabs(){
   const wrap = document.getElementById('jamTabs');
@@ -730,22 +758,26 @@ function renderJamTabs(){
 function renderTaskHeaderAndBody(){
   const loc = LOCATIONS.find(l=>l.key===currentTask.locKey);
   const date = weekDates[activeDayIndex];
-  const guruArr = (state.assignments[currentTask.weekday][currentTask.locKey][currentTask.jam] || []).filter(n=>n);
+  const rawVal = state.assignments[currentTask.weekday][currentTask.locKey][currentTask.jam];
+  const guruArr = (rawVal || []).filter(n=>n);
   const guru = guruArr.join(' & ');
 
   document.getElementById('taskTitle').textContent = guru || "Belum ada guru";
   document.getElementById('taskSub').textContent = loc.label + ' · ' + currentTask.weekday + ', ' + formatTanggal(date) + ' · Jam ke-' + currentTask.jam;
 
   const wrap = document.getElementById('taskBodyWrap');
+  const debugHtml = isAdmin
+    ? '<div style="margin-top:10px;padding:8px 10px;background:rgba(255,255,255,0.06);border-radius:8px;font-size:11px;font-family:monospace;color:#9fb3c8;word-break:break-all;">DEBUG (hanya admin) — data mentah sel ini: ' + escapeHtml(JSON.stringify(rawVal)) + ' · tipe: ' + (Array.isArray(rawVal) ? 'array' : typeof rawVal) + '</div>'
+    : '';
   if(!guru){
-    wrap.innerHTML = '<div class="empty-msg">Belum ada guru piket pada jam ini.</div>';
+    wrap.innerHTML = '<div class="empty-msg">Belum ada guru piket pada jam ini.</div>' + debugHtml;
     return;
   }
   wrap.innerHTML =
     '<div class="task-list" id="taskList"></div>' +
     '<label class="note-label" for="noteArea">Catatan / Keterangan</label>' +
     '<textarea id="noteArea" placeholder="Tulis catatan untuk jam ini…"></textarea>' +
-    '<div class="save-hint">Tersimpan otomatis</div>';
+    '<div class="save-hint">Tersimpan otomatis</div>' + debugHtml;
 
   const progress = getProgress(currentTask.dateISO, currentTask.locKey, currentTask.jam);
   const listEl = document.getElementById('taskList');
@@ -891,72 +923,25 @@ document.getElementById('btnSaveBulkGuru').onclick = ()=>{
   renderGuruPanel();
 };
 
-document.getElementById('btnHarian').onclick = ()=>{
-  const weekday = DAYS[activeDayIndex];
-  const date = weekDates[activeDayIndex];
-  const dISO = isoDate(date);
-  const rows = [["Lokasi","Jam","Guru","Status Checklist","Catatan"]];
-  LOCATIONS.forEach(loc=>{
-    for(let j=JAM_MIN;j<=JAM_MAX;j++){
-      const guru = (state.assignments[weekday][loc.key][j] || []).filter(n=>n).join(' & ');
-      if(!guru) continue;
-      const status = jamStatus(dISO, loc, j);
-      const statusLabel = status==='done' ? 'Selesai' : (status==='partial' ? 'Sebagian' : 'Belum dicek');
-      const log = state.logs[dISO] && state.logs[dISO][loc.key] && state.logs[dISO][loc.key][j];
-      const note = (log && log.note) ? log.note.trim() : '';
-      rows.push([loc.label, 'Jam ke-'+j, guru, statusLabel, note]);
-    }
-  });
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Harian');
-  XLSX.writeFile(wb, 'laporan-piket-'+dISO+'.xlsx');
+document.getElementById('btnUploadExcelGuru').onclick = ()=>{
+  document.getElementById('excelGuruInput').click();
 };
-
-document.getElementById('btnBulanan').onclick = ()=>{
-  const val = document.getElementById('monthPicker').value;
-  if(!val){ alert('Pilih bulan terlebih dahulu.'); return; }
-  const [y,m] = val.split('-').map(Number);
-  const rows = [["Tanggal","Hari","Lokasi","Jam","Guru","Status Checklist","Catatan"]];
-  const d = new Date(y, m-1, 1);
-  while(d.getMonth() === m-1){
-    const jsDay = d.getDay();
-    if(jsDay>=1 && jsDay<=5){
-      const weekday = WEEKDAY_BY_JSDAY[jsDay];
-      const dISO = isoDate(d);
-      LOCATIONS.forEach(loc=>{
-        for(let j=JAM_MIN;j<=JAM_MAX;j++){
-          const guru = (state.assignments[weekday][loc.key][j] || []).filter(n=>n).join(' & ');
-          if(!guru) continue;
-          const status = jamStatus(dISO, loc, j);
-          const statusLabel = status==='done' ? 'Selesai' : (status==='partial' ? 'Sebagian' : 'Belum dicek');
-          const log = state.logs[dISO] && state.logs[dISO][loc.key] && state.logs[dISO][loc.key][j];
-          const note = (log && log.note) ? log.note.trim() : '';
-          rows.push([formatTanggal(d), weekday, loc.label, 'Jam ke-'+j, guru, statusLabel, note]);
-        }
+document.getElementById('excelGuruInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev)=>{
+    try{
+      const data = new Uint8Array(ev.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, {header:1});
+      const found = extractNamesFromSheetRows(rows);
+      let added = 0, skipped = 0;
+      found.forEach(n=>{
+        if(!guruList.includes(n)){ guruList.push(n); added++; }
+        else { skipped++; }
       });
-    }
-    d.setDate(d.getDate()+1);
-  }
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Laporan Bulanan');
-  XLSX.writeFile(wb, 'laporan-piket-'+val+'.xlsx');
-};
-
-(async function init(){
-  weekDates = computeWeekDates();
-  activeDayIndex = computeDefaultDayIndex();
-  const mp = document.getElementById('monthPicker');
-  const now = new Date();
-  mp.value = now.getFullYear()+'-'+pad2(now.getMonth()+1);
-
-  await loadData();
-  await loadGuruList();
-  updateAdminBtn();
-  renderGuruPanel();
-  renderAll();
-})();
-</script>
-</body>
-</html>
+      saveGuruList();
+      renderGuruPanel();
+      alert('Selesai membaca file.\nNama baru ditambahkan: ' + added + (skipped ? '\nDilewati (sudah ada di daftar): ' + skipped : '') + (found.length===0 ? '\n
